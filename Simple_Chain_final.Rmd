@@ -1,0 +1,321 @@
+---
+title: "A Simple Blockchain"
+author: "Stephanie Jordan"
+date: "`r Sys.Date()`"
+#output: rmarkdown::pdf_document
+output: rmarkdown::html_document
+
+---
+
+```{r setup, include = FALSE}
+library(knitr)
+library(digest)
+knitr::opts_chunk$set(collapse = TRUE)
+```
+
+## Description
+In this project, we will create a simple "mini" blockchain in R (without mining). 
+This project is based on examples with R:
+
++ [Understanding Blockchains by Coding One in R](https://www.datacamp.com/community/tutorials/blockchain-r)
++ [Building a blockchain in R](http://users.dimi.uniud.it/~massimo.franceschet/HEX0x6C/blockchain/blockchainR.html )
+
+### Data
+
+In our example, the data for the blockchain must be in form of a *list*.
+E.g. 
+
+```{r Data, echo=TRUE}
+NewData      <- list("Jordan",matrix(1:4,ncol=2)
+                     ,hist(rnorm(234),plot=FALSE),200)
+```
+
+In this example, the data "NewData" is very heterogeneous - the list of length `r length(NewData) ` consists of different classes. 
+
+### Structure of a block
+
+A block is a **list**, which consits of 6 elements (in our simple case):
+
++ **index** index of the block
++ **timestamp** timestamp of the block
++ **data** data to be stored in the block
++ **previous_hash** previous hash (whereas for the genesis Block it is set to 0)
++ **proof proof** (provided by Proof of Work function)
++ **new_hash** hash of current block
+
+### Hash function
+
+Function that creates the "hashed block". For our hashes, we use the Sha-256 algorithm as implemented in the package **digest**
+
+``` {r, echo= TRUE}
+  hash_block <- function(block){
+  # block: block to be hashed
+
+    block$new_hash <- digest(c(block$index,
+                             block$timestamp,
+                             block$data,
+                             block$previous_hash), "sha256")
+  return(block)
+}
+```
+### Proof of work functions
+
+A new block needs to be validated and approved. We provide two different proof of work (PoW) functions:
+
+#### Function **"proof_of_work"**
+
+Increment the proof number until a number is found that is divisable
+ by *"Number"* (default= 99) and by *"proof"* of the previous block.
+
+
+``` {r, echo=TRUE}
+ proof_of_work <- function(last_proof,Number=99)
+   {
+    proof <- last_proof + 1
+  while (!(proof %% Number == 0 & proof %% last_proof == 0 ))
+    {
+    proof <- proof + 1
+    }
+ return(proof)
+}
+```
+
+#### Function **"Nonce"**
+
+In the case of BitCoin the PoW problem involves the problem of finding a number (called nonce)
+that once added to the block is such that the corresponding block hash contains a certain amount
+of leading zeros called difficulty (more specifically, Hashcash).
+The average work that a miner needs to perform in order to find a valid nonce is exponential in the difficulty,
+while one can verify the validity of the block by executing a single hash function.
+
+``` {r, echo=TRUE}
+
+Nonce <-  function(block,difficulty=1)
+  {
+  block$proof  <- 0
+  hash <-   digest(block, "sha256")
+  zero <-   paste(rep("0", difficulty), collapse="")
+  while(substr(hash, 1, difficulty) != zero)
+    {
+    block$proof <- block$proof + 1
+    hash <-  digest(block, "sha256")
+    }
+  block$proof
+}
+```
+
+### Genesis Block
+
+In order to create a new blockchain, first a so-called genesis block has to be built: this is provided by the function **block_gen**:
+
+``` {r, echo= TRUE}
+block_gen     <- function(data,prevHash="0")
+{
+ # data:     Data for the new chain
+ # prevHash: Arbitrary string serving as previous hash
+
+  block_genesis <-  list(index = 1,
+                         timestamp = Sys.time(),
+                         data = data,
+                         previous_hash = prevHash ,
+                         proof = 1)
+  return(hash_block(block_genesis))
+}
+```
+##### Example:
+``` {r, echo= TRUE}
+myData <- data.frame(x=rnorm(5),y=rpois(5,lambda=3))
+GenBlock <- block_gen(data=list(myData))
+print(GenBlock)
+```
+
+
+
+### Generating a new block
+
+Generating a single new block as successor of a "previous block" is provided by the function **gen_new_block**:
+
+```{r, echo=TRUE}
+gen_new_block <- function(previous_block,data,PoW_func="proof_of_work",...)
+{
+# previous_block: Previous block.
+# data:           Data for the new block.
+# PoW_func:       String with the name Proof-of-Work function.
+# ... :           Additional parameter(s) passed to the Proof-of-Work function.
+
+
+  #Create new Block
+  new_block <- list(index = previous_block$index + 1,
+                    timestamp = Sys.time(),
+                    data = data,
+                    previous_hash = previous_block$new_hash)
+
+  #Proof-of-Work
+  if(PoW_func=="proof_of_work") 
+      {new_proof <- proof_of_work(last_proof=previous_block$proof,...)}
+  if(PoW_func=="Nonce")     new_proof <- Nonce(new_block,...)
+  if(!(PoW_func %in% c("proof_of_work","Nonce"))) 
+    {stop("This PoW-function is not implemented!")}
+  new_block$proof  <- new_proof
+
+  #Hash the new Block
+  new_block_hashed <- hash_block(new_block)
+
+  return(new_block_hashed)
+}
+```
+
+##### Example:
+``` {r, echo= TRUE}
+NewData     <- list("Jordan",matrix(1:4,ncol=2),hist(rnorm(234),plot=FALSE),200)
+prev_block  <- block_gen(data="Stephanie")
+print(prev_block)
+block2         <- gen_new_block(previous_block=prev_block,data=NewData[[1]]
+                                ,PoW_func="proof_of_work",Number=33)
+print(block2)
+```
+
+
+
+### Add new blocks to a chain
+Adding blocks to an existing blockchain:
+
+```{r, echo=TRUE}
+add_blocks <- function(blockchain,n_add,new_data,PoW_func="proof_of_work",...)
+{
+#  blockchain: Blockchain to which new blocks are added.
+#  n_add:      Number of blocks to be added.
+#  new_data:   New data, list of length \code{n_add}.
+#  PoW_func:   String with the name Proof-of-Work function.
+#  ... :       Additional parameter(s) passed to the Proof-of-Work function.
+
+  lengthChain    <- length(blockchain)
+  if(!is.list(new_data)) stop("new_data must be in form of a list!")
+  if(n_add > length(new_data)) stop("The number of new blocks must 
+                                    not be greater then the number of new data.")
+  previous_block <- blockchain[[lengthChain]]
+  newChain       <- blockchain
+  for (i in 1:n_add)
+  {
+    block_to_add <- gen_new_block(previous_block,data=new_data[[i]]
+                                  ,PoW_func=PoW_func,...)
+    newChain <- c(newChain,list(block_to_add))
+    previous_block  <- block_to_add
+  }
+  newChain
+}
+```
+##### Example:
+```{r, echo=TRUE}
+blockchain1  <- list(block_gen(data="Stephanie"))
+print(blockchain1)
+
+NewData      <- list("Jordan",matrix(1:4,ncol=2),hist(rnorm(234),plot=FALSE),200)
+n            <- length(NewData)
+blockchain2  <- add_blocks(blockchain=blockchain1, n_add=n,
+                       new_data=NewData,PoW_func = "proof_of_work",Number=33)
+```
+
+
+### Creating a new chain
+
+The function **new_chain** initializes a new blockchain based on a list containing data:
+
+```{r, echo= TRUE}
+
+new_chain <- function(data,PoW_func,...)
+{
+# data: List with the data for the new chain.
+# PoW_func:   String with the name Proof-of-Work function.
+# ... :       Additional parameter(s) passed to the Proof-of-Work function.
+
+  if(!is.list(data)) stop("data must be in form of a list")
+  n       <- length(data)
+  if(n > 1)
+  {
+  X.0     <- list(block_gen(data[[1]],prevHash="0"))
+   n.add   <- n-1
+   Xdata   <- data[-1]
+   X       <- add_blocks(X.0,n.add,Xdata)
+  } else  X <- list(block_gen(data[[1]],prevHash="0"))
+  X
+  }
+```
+##### Example:
+```{r, echo=TRUE}
+MyData <- list(224,matrix(1:6,ncol=2),"Stephanie",c(220,230))
+NewChain <- new_chain(data=MyData,PoW_func="Nonce",difficulty=2)
+print(NewChain)
+```
+
+### Validating a chain
+
+A simple validation of a block chain. The validation has two parts:
+
+1. Checking that the encoding gives the correct hashes.
+2. Checking that the parent field of a non-genesis block references to the previous block in the chain.
+
+The function **validate_chain** takes as input a blockchain and  its output is a logical value: TRUE if the validation was successful. 
+
+```{r, echo=TRUE}
+validate_chain <- function(blockchain)
+{
+  for (i in 1:length(blockchain))
+  {
+    #print(paste("block:",i))
+    block <- blockchain[[i]]
+    hash <-  block$new_hash
+    #print(hash)
+    block$new_hash  <- NULL
+
+    hash_expected <-  hash_block(block)$new_hash
+    #print(hash_expected)
+    if (hash != hash_expected) {
+      return(FALSE)
+    }
+  }
+  if (length(blockchain) >= 2)
+  {
+    for (i in 2:length(blockchain))
+    {
+      if (blockchain[[i]]$previous_hash != blockchain[[i-1]]$new_hash)
+      {
+        print(paste("Parent structure",(i-1)," ->",i,"is wrong."))
+        return(FALSE)
+      } else
+        return(TRUE)
+    }
+  }
+}
+```
+##### Example:
+```{r, echo=TRUE}
+MyData <- list(224,matrix(1:6,ncol=2),"Stephanie")
+NewChain <- new_chain(MyData)
+validate_chain(NewChain)
+```
+
+## Workflow
+
+In order to create a new chain and to add new blocks, only the functions **new_chain** and **add_blocks** are needed; all the other functions are then internally called within these two functions.
+
+### Example
+
+First, we create a new chain whose data are give as:
+
+```{r, echo=TRUE}
+MyData <- list(224,matrix(1:6,ncol=2),"Stephanie",c(220,230))
+newChain <- new_chain(data=MyData,PoW_func="Nonce",difficulty=2)
+print(newChain)
+```
+
+In order to add new block(s) from new data, the function **add_blocks** is used:
+
+```{r, echo=TRUE}
+newData <- list(data.frame(x1=rnorm(5),Gender=c("f","f","m","f","m")),1:9)
+updatedChain <- add_blocks(blockchain=newChain,n_add=2,new_data=newData,
+                      PoW_func="Nonce",difficulty=2)
+print(updatedChain)
+```
+
+
